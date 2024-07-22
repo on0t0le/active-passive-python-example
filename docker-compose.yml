@@ -1,0 +1,52 @@
+version: "3.8"
+
+services:
+  redis:
+    image: redis
+    ports:
+      - 6379:6379
+    networks:
+      - net
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+      - RABBITMQ_DEFAULT_VHOST=/
+    ports:
+      - 5672:5672
+      - 15672:15672
+    networks:
+      - net
+
+  # node1:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   environment:
+  #     - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+  #     - REDIS_HOST=redis
+  #     - REDIS_PORT=6379
+  #   networks:
+  #     - net
+  #   depends_on:
+  #     - redis
+  #     - rabbitmq
+
+  # node2:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   environment:
+  #     - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+  #     - REDIS_HOST=redis
+  #     - REDIS_PORT=6379
+  #   networks:
+  #     - net
+  #   depends_on:
+  #     - redis
+  #     - rabbitmq
+
+networks:
+  net:
