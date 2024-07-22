@@ -2,12 +2,12 @@ import time
 import redis
 import os
 import uuid
-import threading
 import pika
+from multiprocessing import Process, Value
 
 # Fetch configuration from environment variables
 INSTANCE_ID = str(uuid.uuid4())
-ROLE = 'standby'  # Initial role
+ROLE = Value('i', 0)  # 0 for standby, 1 for active
 RABBITMQ_HOST = os.getenv('RABBITMQ_HOST', 'localhost')
 RABBITMQ_PORT = int(os.getenv('RABBITMQ_PORT', '5672'))
 RABBITMQ_USER = os.getenv('RABBITMQ_USER', 'guest')
@@ -20,29 +20,29 @@ HEARTBEAT_INTERVAL = 5  # Heartbeat interval in seconds
 connection = None
 channel = None
 
-def send_heartbeat():
+def send_heartbeat(role):
     r = redis.StrictRedis(host=REDIS_HOST, port=REDIS_PORT)
     while True:
-        if ROLE == 'active':
+        if role.value == 1:
             r.set('heartbeat', 'active', ex=LOCK_EXPIRATION)
         time.sleep(HEARTBEAT_INTERVAL)
 
-def check_heartbeat():
-    global ROLE
+def check_heartbeat(role):
+    global connection, channel
     r = redis.StrictRedis(host=REDIS_HOST, port=REDIS_PORT)
     while True:
         heartbeat = r.get('heartbeat')
-        if heartbeat is None and ROLE == 'standby':
+        if heartbeat is None and role.value == 0:
             print(f"Instance {INSTANCE_ID}: Active instance is down. Attempting to become active.")
             if try_to_become_leader(r):
                 print(f"Instance {INSTANCE_ID}: Promoted to active.")
-                ROLE = 'active'
+                role.value = 1
                 connect_to_rabbitmq()
-        elif heartbeat is not None and ROLE == 'active':
+        elif heartbeat is not None and role.value == 1:
             print(f"Instance {INSTANCE_ID}: Detected another active instance. Checking leadership.")
             if not renew_leader_lock(r):
                 print(f"Instance {INSTANCE_ID}: Lost leadership. Switching to standby.")
-                ROLE = 'standby'
+                role.value = 0
                 disconnect_from_rabbitmq()
         time.sleep(HEARTBEAT_INTERVAL)
 
@@ -74,7 +74,12 @@ def disconnect_from_rabbitmq():
     print(f"Instance {INSTANCE_ID}: Disconnected from RabbitMQ")
 
 if __name__ == "__main__":
-    # Run both heartbeat and failover checks
-    heartbeat_thread = threading.Thread(target=send_heartbeat)
-    heartbeat_thread.start()
-    check_heartbeat()
+    # Run both heartbeat and failover checks using multiprocessing
+    heartbeat_process = Process(target=send_heartbeat, args=(ROLE,))
+    heartbeat_process.start()
+
+    check_heartbeat_process = Process(target=check_heartbeat, args=(ROLE,))
+    check_heartbeat_process.start()
+
+    heartbeat_process.join()
+    check_heartbeat_process.join()
